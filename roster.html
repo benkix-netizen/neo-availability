@@ -61,6 +61,15 @@
   }
   .month-chip.active { background: var(--accent); border-color: var(--accent); color: #101405; font-weight: 600; }
 
+  .my-sets-bar {
+    display: none; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 10px;
+    padding: 0.9rem 1.1rem; margin-bottom: 20px;
+  }
+  .my-sets-bar.show { display: flex; }
+  .my-sets-bar .msg { font-size: 0.85rem; color: var(--text-dim); }
+
   .event-card {
     background: var(--card); border: 1px solid var(--card-border);
     border-radius: 14px; padding: 18px; margin-bottom: 18px;
@@ -72,15 +81,59 @@
     text-align: left; font-size: 0.78rem; text-transform: uppercase;
     letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 6px; caption-side: top;
   }
-  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--card-border); }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--card-border); vertical-align: top; }
   th { color: var(--text-dim); font-weight: 500; font-size: 0.78rem; }
   th.time-col, td.time-col { font-size: 0.8rem; white-space: nowrap; }
   tr.mine td { background: rgba(198, 255, 61, 0.12); font-weight: 600; }
-  .assigned-blank { color: var(--text-dim); font-style: italic; }
+  .assigned-blank { color: var(--text-dim); font-style: italic; font-weight: 400; }
+
   .cal-btn {
     background: var(--accent); color: #101405; border: none; border-radius: 6px;
     padding: 4px 10px; font-size: 0.75rem; cursor: pointer; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
   }
+  .cal-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .cal-btn.small { font-size: 0.72rem; padding: 4px 9px; }
+  .cal-btn.swap { background: transparent; border: 1px solid #ffb74d; color: #ffb74d; }
+  .cal-btn.swap:hover:not(:disabled) { background: #ffb74d; color: #1a0f00; }
+  .cal-btn.report { background: transparent; border: 1px solid #6ec6ff; color: #6ec6ff; }
+  .cal-btn.report:hover:not(:disabled) { background: #6ec6ff; color: #04101a; }
+
+  .actions-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+  .no-email-note { font-size: 0.72rem; color: #ff8080; }
+  .swap-status { font-size: 0.72rem; color: #ffb74d; }
+  .swap-badge {
+    display: inline-flex; align-items: center; gap: 4px; width: fit-content;
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.3px;
+    color: #ffb74d; background: rgba(255, 183, 77, 0.12);
+    border: 1px solid rgba(255, 183, 77, 0.4); border-radius: 999px; padding: 2px 8px; margin-top: 4px;
+  }
+  .volunteer-list { font-size: 0.68rem; color: var(--text-dim); margin-top: 2px; }
+
+  .time-report-form {
+    display: none; flex-wrap: wrap; align-items: flex-end; gap: 10px;
+    background: var(--bg); border: 1px solid var(--card-border); border-radius: 8px;
+    padding: 10px 12px; margin-top: 6px;
+  }
+  .time-report-form.show { display: flex; }
+  .time-report-form label {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 0.68rem; color: var(--text-dim); letter-spacing: 0.3px;
+  }
+  .time-report-form input {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 6px;
+    color: var(--text); font-family: inherit; font-size: 0.8rem; padding: 6px 8px;
+  }
+  .time-report-form input[type="text"] { min-width: 160px; }
+  .tr-status { font-size: 0.68rem; color: #6ec6ff; }
+
+  .promo-section { margin-top: 1.75rem; }
+  .promo-label {
+    font-size: 0.75rem; font-weight: 600; color: var(--accent);
+    letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px;
+  }
+  .promo-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  .promo-btn-dates { opacity: 0.7; font-weight: 400; }
 
   .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
 </style>
@@ -107,15 +160,29 @@
     <button class="month-arrow" id="month-next" aria-label="Next month">›</button>
   </div>
 
+  <div class="my-sets-bar" id="my-sets-bar">
+    <span class="msg" id="my-sets-msg"></span>
+    <button class="cal-btn" id="add-all-btn">Add all my sets to Calendar</button>
+  </div>
+
   <div id="event-list"></div>
+
+  <div class="promo-section" id="promo-section">
+    <div class="promo-label">Share this month</div>
+    <div class="promo-buttons" id="promo-buttons"></div>
+  </div>
 </div>
 
 <script>
 const SHEET_ID = "1hw_Pa2fzNC18LoXNs2BPZA1caFtNi2-gxE7wYj9AhXs";
 const CREW_SHEET_NAME = "Crew";
+const SWAP_SHEET_NAME = "SwapRequests";
 const TZ = "Australia/Melbourne";
 const VENUE_NAME = "Neo";
 const ORGANIZER_EMAIL = "benki@redlineartistry.com";
+// Deployed from the Apps Script backend handed over alongside this repo --
+// see that file's header comment for the setup/deploy steps.
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwjlqaI-WxEIf7gML88mVzMbxcWlbSNDEuZ-l5kF_HGqz_Bw35pzwijQQ4GLQGFr1MJDA/exec";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -244,6 +311,25 @@ async function fetchCrew() {
   return { names: [...names].sort(), emailMap };
 }
 
+// Only "open" requests matter here -- once the owner reassigns the slot by
+// hand in the roster grid and flips Status to "resolved" in the sheet, it
+// drops out of this map and the badge/buttons disappear on the next load.
+function parseSwapMap(rows) {
+  const map = {};
+  if (!rows || rows.length < 2) return map;
+  const idx = indexHeader(rows[0]);
+  rows.slice(1).forEach(r => {
+    if ((r[idx["Status"]] || "").trim() !== "open") return;
+    const date = (r[idx["Date"]] || "").trim();
+    const role = (r[idx["Role"]] || "").trim();
+    if (!date || !role) return;
+    const requestedBy = (r[idx["Name"]] || "").trim();
+    const volunteers = (r[idx["Volunteers"]] || "").split(",").map(s => s.trim()).filter(Boolean);
+    map[`${date}|${role}`] = { requestedBy, volunteers, date, role };
+  });
+  return map;
+}
+
 function groupIntoEvents(slots) {
   const byDate = {};
   slots.forEach(s => {
@@ -257,10 +343,38 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+function escapeXml(str) {
+  return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function slugify(str) {
+  return String(str).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
 function formatDateDisplay(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function todayIso() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+}
+
+// Reporting only makes sense once a set has actually happened.
+function slotHasPassed(dateIso) {
+  return dateIso < todayIso();
+}
+
+// Fire-and-forget, same as the availability form's submit -- Apps Script
+// Web Apps don't reliably send CORS headers on POST responses, so we post
+// with no-cors (opaque response) and update the UI optimistically.
+async function postToScript(payload) {
+  await fetch(SCRIPT_URL, {
+    method: "POST", mode: "no-cors",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 }
 
 // ---- .ics calendar export ----
@@ -314,7 +428,7 @@ function icsEscape(str) {
   return String(str || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
 }
 
-function buildVevent(slot, name) {
+function buildVevent(slot, name, email) {
   const startClock = parseClockFlexible(slot.start);
   if (!startClock) return null;
   // Close has no End time in the sheet -- default to a 2-hour block so it's
@@ -337,23 +451,26 @@ function buildVevent(slot, name) {
     `DTEND:${icsDate(endUtc)}`,
     `SUMMARY:${icsEscape(VENUE_NAME)} — ${icsEscape(slot.role)}`,
     `LOCATION:${icsEscape(VENUE_NAME)}`,
+    `ORGANIZER;CN=${icsEscape(VENUE_NAME)}:mailto:${ORGANIZER_EMAIL}`,
+    email ? `ATTENDEE;CN=${icsEscape(name)};RSVP=TRUE:mailto:${email}` : "",
+    "STATUS:CONFIRMED",
     "END:VEVENT"
-  ].join("\r\n");
+  ].filter(Boolean).join("\r\n");
 }
 
 function buildIcs(vevents) {
-  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Redline Neo//Roster//EN", ...vevents, "END:VCALENDAR"].join("\r\n");
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Redline Neo//Roster//EN", "CALSCALE:GREGORIAN", ...vevents, "END:VCALENDAR"].join("\r\n");
 }
 
 function downloadIcs(filename, vevents) {
-  const blob = new Blob([buildIcs(vevents)], { type: "text/calendar" });
+  const blob = new Blob([buildIcs(vevents)], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  a.remove();
   URL.revokeObjectURL(url);
 }
 
@@ -374,74 +491,346 @@ function timeSortKey(str) {
   return h * 60 + clock.minute;
 }
 
+// ---- Instagram Story promo image export ----
+// 1080x1920. Uses system fonts, not custom web fonts -- @import fonts inside
+// an SVG often fail to load when rasterized via <img>+canvas, so this
+// favours reliability over exactly matching the page's own font.
+
+function buildStorySvg(ev, monthLabel) {
+  const W = 1080, H = 1920;
+  const lines = [];
+  let y = 490;
+  const dateLabel = formatDateDisplay(ev.date);
+
+  lines.push(`<text x="90" y="${y}" font-family="Georgia, serif" font-weight="700" font-size="46" fill="#c6ff3d">${escapeXml(dateLabel)}</text>`);
+  y += 20;
+  lines.push(`<line x1="90" y1="${y}" x2="990" y2="${y}" stroke="#29293a" stroke-width="2"/>`);
+  y += 56;
+
+  ev.slots.slice().sort((a, b) => ALL_SLOT_ROLES.indexOf(a.role) - ALL_SLOT_ROLES.indexOf(b.role)).forEach(slot => {
+    const name = slot.assigned || "Unassigned";
+    const color = slot.assigned ? "#ffffff" : "#6a6a78";
+    const style = slot.assigned ? "" : ' font-style="italic"';
+    const timeText = slot.end ? `${formatShortTime(slot.start)}–${formatShortTime(slot.end)}` : formatShortTime(slot.start);
+    lines.push(`<text x="90" y="${y}" font-family="Segoe UI, sans-serif" font-size="30" fill="#a8a8b8">${escapeXml(slot.role)} · ${escapeXml(timeText)}</text>`);
+    lines.push(`<text x="990" y="${y}" text-anchor="end" font-family="Segoe UI, sans-serif" font-weight="700" font-size="32" fill="${color}"${style}>${escapeXml(name)}</text>`);
+    y += 62;
+  });
+
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="storyBg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0d0710"/>
+        <stop offset="55%" stop-color="#1a0f2e"/>
+        <stop offset="100%" stop-color="#050506"/>
+      </linearGradient>
+    </defs>
+    <rect width="${W}" height="${H}" fill="url(#storyBg)"/>
+    <g stroke="#c6ff3d" stroke-width="3" fill="none" opacity="0.85">
+      <path d="M 50 170 V 90 Q 50 60 80 60 H 160"/>
+      <path d="M 920 60 H 1000 Q 1030 60 1030 90 V 170"/>
+      <path d="M 1030 ${H - 170} V ${H - 90} Q 1030 ${H - 60} 1000 ${H - 60} H 920"/>
+      <path d="M 160 ${H - 60} H 80 Q 50 ${H - 60} 50 ${H - 90} V ${H - 170}"/>
+    </g>
+    <text x="540" y="180" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="30" letter-spacing="8" fill="#c6ff3d">NEO</text>
+    <text x="540" y="290" text-anchor="middle" font-family="Georgia, serif" font-weight="700" font-size="70" fill="#ffffff">${escapeXml(monthLabel)}</text>
+    <line x1="440" y1="340" x2="640" y2="340" stroke="#c6ff3d" stroke-width="2"/>
+    ${lines.join("\n    ")}
+    <text x="540" y="${H - 90}" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="24" fill="#8d8da0">Full roster: benkix-netizen.github.io/neo-availability/roster.html</text>
+  </svg>`;
+}
+
+function downloadStoryPng(svgString, filename) {
+  const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1080; canvas.height = 1920;
+    canvas.getContext("2d").drawImage(img, 0, 0, 1080, 1920);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(blob => {
+      const pngUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = pngUrl; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(pngUrl);
+    }, "image/png");
+  };
+  img.onerror = () => { console.error("Failed to render story image"); URL.revokeObjectURL(url); };
+  img.src = url;
+}
+
+function initPromoButtons(events, monthLabel) {
+  const container = document.getElementById("promo-buttons");
+  container.innerHTML = "";
+  events.forEach(ev => {
+    const dateLabel = formatDateDisplay(ev.date);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cal-btn small";
+    btn.innerHTML = `Download <span class="promo-btn-dates">(${escapeHtml(dateLabel)})</span>`;
+    btn.onclick = () => {
+      const svg = buildStorySvg(ev, monthLabel);
+      downloadStoryPng(svg, `Neo-${slugify(monthLabel)}-${slugify(dateLabel)}.png`);
+    };
+    container.appendChild(btn);
+  });
+}
+
 // ---- rendering ----
 
 let allEvents = [];
 let emailMap = {};
 let selectedName = "";
+let currentSwapMap = {};
 let currentMonthIdx = null;
 let currentYear = null;
+
+function buildTimeReportRow(slot, colSpan) {
+  const tr = document.createElement("tr");
+  const td = document.createElement("td");
+  td.colSpan = colSpan;
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "cal-btn report small";
+  btn.textContent = "Report Actual Time";
+
+  const form = document.createElement("div");
+  form.className = "time-report-form";
+  form.innerHTML = `
+    <label>Actual start <input type="time" class="tr-start"></label>
+    <label>Actual end <input type="time" class="tr-end"></label>
+    <label>Note (optional) <input type="text" class="tr-note" placeholder="e.g. ran late"></label>
+    <button type="button" class="cal-btn small tr-submit">Submit</button>
+    <span class="tr-status"></span>
+  `;
+
+  btn.onclick = () => form.classList.toggle("show");
+
+  form.querySelector(".tr-submit").addEventListener("click", async () => {
+    const startVal = form.querySelector(".tr-start").value;
+    const endVal = form.querySelector(".tr-end").value;
+    const noteVal = form.querySelector(".tr-note").value.trim();
+    const statusEl = form.querySelector(".tr-status");
+    if (!startVal || !endVal) { statusEl.textContent = "Enter both times."; return; }
+
+    const submitBtn = form.querySelector(".tr-submit");
+    submitBtn.disabled = true;
+    await postToScript({
+      action: "reportTime",
+      name: selectedName, email: emailMap[selectedName] || "",
+      date: slot.date, role: slot.role,
+      scheduledStart: slot.start, scheduledEnd: slot.end,
+      actualStart: startVal, actualEnd: endVal, note: noteVal
+    });
+    statusEl.textContent = "Reported — thanks!";
+    form.querySelector(".tr-start").disabled = true;
+    form.querySelector(".tr-end").disabled = true;
+    form.querySelector(".tr-note").disabled = true;
+    submitBtn.disabled = true;
+  });
+
+  td.appendChild(btn);
+  td.appendChild(form);
+  tr.appendChild(td);
+  return tr;
+}
+
+function buildActionsCell(slot) {
+  const td = document.createElement("td");
+  td.className = "actions-cell";
+  const mine = selectedName && slot.assigned === selectedName;
+  const swapKey = `${slot.date}|${slot.role}`;
+  const openSwap = currentSwapMap[swapKey];
+
+  if (mine) {
+    const email = emailMap[selectedName];
+    if (email) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cal-btn small";
+      btn.textContent = "Add to Calendar";
+      btn.onclick = () => {
+        const vevent = buildVevent(slot, selectedName, email);
+        if (vevent) downloadIcs(`Neo-${slot.role.replace(/\s+/g, "-")}-${slot.date}.ics`, [vevent]);
+      };
+      td.appendChild(btn);
+    } else {
+      const note = document.createElement("span");
+      note.className = "no-email-note";
+      note.textContent = "No email on file yet";
+      td.appendChild(note);
+    }
+
+    if (openSwap) {
+      const status = document.createElement("span");
+      status.className = "swap-status";
+      status.textContent = "Coverage requested — waiting for a volunteer";
+      td.appendChild(status);
+    } else {
+      const swapBtn = document.createElement("button");
+      swapBtn.type = "button";
+      swapBtn.className = "cal-btn swap small";
+      swapBtn.textContent = "Need Coverage";
+      swapBtn.onclick = async () => {
+        swapBtn.disabled = true;
+        await postToScript({ action: "requestCoverage", name: selectedName, email: email || "", date: slot.date, role: slot.role });
+        currentSwapMap[swapKey] = { requestedBy: selectedName, volunteers: [], date: slot.date, role: slot.role };
+        render();
+      };
+      td.appendChild(swapBtn);
+    }
+  } else if (openSwap && selectedName && slot.assigned !== selectedName) {
+    const already = openSwap.volunteers.includes(selectedName);
+    const volBtn = document.createElement("button");
+    volBtn.type = "button";
+    volBtn.className = "cal-btn swap small";
+    if (already) {
+      volBtn.textContent = "You volunteered";
+      volBtn.disabled = true;
+    } else {
+      volBtn.textContent = "I can cover this";
+      volBtn.onclick = async () => {
+        volBtn.disabled = true;
+        await postToScript({ action: "volunteer", name: selectedName, email: emailMap[selectedName] || "", date: slot.date, role: slot.role });
+        openSwap.volunteers.push(selectedName);
+        render();
+      };
+    }
+    td.appendChild(volBtn);
+  }
+  return td;
+}
+
+function buildAssignedCell(slot) {
+  const td = document.createElement("td");
+  const nameSpan = document.createElement("span");
+  if (slot.assigned) {
+    nameSpan.textContent = slot.assigned;
+  } else {
+    nameSpan.className = "assigned-blank";
+    nameSpan.textContent = "unassigned";
+  }
+  td.appendChild(nameSpan);
+
+  const openSwap = currentSwapMap[`${slot.date}|${slot.role}`];
+  if (openSwap) {
+    const badge = document.createElement("div");
+    badge.className = "swap-badge";
+    badge.textContent = "🔁 Needs coverage";
+    td.appendChild(badge);
+    if (openSwap.volunteers.length) {
+      const vol = document.createElement("div");
+      vol.className = "volunteer-list";
+      vol.textContent = "Volunteered: " + openSwap.volunteers.join(", ");
+      td.appendChild(vol);
+    }
+  }
+  return td;
+}
 
 function renderRoleTable(slots, roleSet, caption) {
   const rows = slots.filter(s => roleSet.includes(s.role)).slice().sort((a, b) => {
     const roleDiff = roleSet.indexOf(a.role) - roleSet.indexOf(b.role);
     return roleDiff !== 0 ? roleDiff : timeSortKey(a.start) - timeSortKey(b.start);
   });
-  if (rows.length === 0) return "";
+  if (rows.length === 0) return null;
 
-  const cells = rows.map(s => {
+  const table = document.createElement("table");
+  const captionEl = document.createElement("caption");
+  captionEl.textContent = caption;
+  const thead = document.createElement("thead");
+  thead.innerHTML = `<tr>
+    <th class="time-col">Time</th>
+    <th>Role</th>
+    <th>Assigned</th>
+    <th>Actions</th>
+  </tr>`;
+  const tbody = document.createElement("tbody");
+
+  rows.forEach(s => {
     const mine = selectedName && s.assigned === selectedName;
-    const assignedCell = s.assigned
-      ? escapeHtml(s.assigned)
-      : '<span class="assigned-blank">unassigned</span>';
-    const calBtn = (mine && emailMap[selectedName])
-      ? `<button type="button" class="cal-btn" data-date="${escapeHtml(s.date)}" data-role="${escapeHtml(s.role)}" data-start="${escapeHtml(s.start)}">Add to Calendar</button>`
-      : "";
-    return `
-      <tr class="${mine ? "mine" : ""}">
-        <td class="time-col">${formatShortTime(s.start)}${s.end ? "–" + formatShortTime(s.end) : ""}</td>
-        <td>${escapeHtml(s.role)}</td>
-        <td>${assignedCell}</td>
-        <td>${calBtn}</td>
-      </tr>`;
-  }).join("");
+    const tr = document.createElement("tr");
+    if (mine) tr.className = "mine";
 
-  return `
-    <table>
-      <caption>${caption}</caption>
-      <thead><tr>
-        <th class="time-col">Time</th>
-        <th>Role</th>
-        <th>Assigned</th>
-        <th></th>
-      </tr></thead>
-      <tbody>${cells}</tbody>
-    </table>`;
+    const timeTd = document.createElement("td");
+    timeTd.className = "time-col";
+    timeTd.textContent = s.end ? `${formatShortTime(s.start)}–${formatShortTime(s.end)}` : formatShortTime(s.start);
+    const roleTd = document.createElement("td");
+    roleTd.textContent = s.role;
+
+    tr.appendChild(timeTd);
+    tr.appendChild(roleTd);
+    tr.appendChild(buildAssignedCell(s));
+    tr.appendChild(buildActionsCell(s));
+    tbody.appendChild(tr);
+
+    if (mine && slotHasPassed(s.date)) {
+      tbody.appendChild(buildTimeReportRow(s, 4));
+    }
+  });
+
+  table.appendChild(captionEl);
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  return table;
+}
+
+function updateMySetsBar() {
+  const bar = document.getElementById("my-sets-bar");
+  const msg = document.getElementById("my-sets-msg");
+  const addAllBtn = document.getElementById("add-all-btn");
+
+  if (!selectedName) { bar.classList.remove("show"); return; }
+
+  const mySlots = allEvents.flatMap(ev => ev.slots.filter(s => s.assigned === selectedName));
+  const email = emailMap[selectedName];
+  bar.classList.add("show");
+
+  if (mySlots.length === 0) {
+    msg.textContent = "You don't have any sets on this roster yet.";
+    addAllBtn.style.display = "none";
+  } else if (!email) {
+    msg.textContent = `${mySlots.length} set${mySlots.length === 1 ? "" : "s"} — no email on file yet. Submit your next availability form to enable calendar invites.`;
+    addAllBtn.style.display = "none";
+  } else {
+    msg.textContent = `You have ${mySlots.length} set${mySlots.length === 1 ? "" : "s"} this month.`;
+    addAllBtn.style.display = "inline-flex";
+    addAllBtn.onclick = () => {
+      const vevents = mySlots.map(s => buildVevent(s, selectedName, email)).filter(Boolean);
+      downloadIcs(`Neo-${slugify(selectedName)}-all-sets.ics`, vevents);
+    };
+  }
 }
 
 function render() {
   const listEl = document.getElementById("event-list");
+  listEl.innerHTML = "";
+
   if (allEvents.length === 0) {
     listEl.innerHTML = `<div class="empty-state">No Neo roster for ${MONTHS[currentMonthIdx]} ${currentYear} yet.</div>`;
+    updateMySetsBar();
     return;
   }
 
-  listEl.innerHTML = allEvents.map(ev => `
-    <div class="event-card">
-      <h2>${escapeHtml(formatDateDisplay(ev.date))}</h2>
-      ${renderRoleTable(ev.slots, ENTERTAINMENT_ROLES, "Entertainment")}
-      ${renderRoleTable(ev.slots, MEDIA_ROLES, "Media")}
-    </div>`).join("");
+  allEvents.forEach(ev => {
+    const card = document.createElement("div");
+    card.className = "event-card";
+    const h2 = document.createElement("h2");
+    h2.textContent = formatDateDisplay(ev.date);
+    card.appendChild(h2);
 
-  listEl.querySelectorAll(".cal-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const { date, role, start } = btn.dataset;
-      const ev = allEvents.find(e => e.date === date);
-      const slot = ev.slots.find(s => s.role === role && s.start === start);
-      const vevent = buildVevent(slot, selectedName);
-      if (vevent) downloadIcs(`Neo-${role.replace(/\s+/g, "-")}-${date}.ics`, [vevent]);
-    });
+    const entTable = renderRoleTable(ev.slots, ENTERTAINMENT_ROLES, "Entertainment");
+    if (entTable) card.appendChild(entTable);
+    const mediaTable = renderRoleTable(ev.slots, MEDIA_ROLES, "Media");
+    if (mediaTable) card.appendChild(mediaTable);
+
+    listEl.appendChild(card);
   });
+
+  updateMySetsBar();
 }
 
 // Rebuilds the chip row centered on whatever month is being loaded (not
@@ -484,11 +873,13 @@ async function loadMonth(monthIdx, year) {
   const slots = await fetchMonthSlots(monthIdx, year);
   allEvents = slots ? groupIntoEvents(slots) : [];
   render();
+  initPromoButtons(allEvents, `${MONTHS[monthIdx]} ${year}`);
 }
 
 async function main() {
-  const crew = await fetchCrew();
+  const [crew, swapRows] = await Promise.all([fetchCrew(), fetchCsvBySheetName(SWAP_SHEET_NAME)]);
   emailMap = crew.emailMap;
+  currentSwapMap = parseSwapMap(swapRows);
 
   const picker = document.getElementById("crew-picker");
   crew.names.forEach(name => {

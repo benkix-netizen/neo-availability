@@ -396,7 +396,7 @@ async function submitForm() {
       method: "POST",
       mode: "no-cors",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: selectedName, email, slots })
+      body: JSON.stringify({ action: "submitAvailability", name: selectedName, email, slots })
     });
     document.getElementById("submit-status").textContent = "Availability submitted — thank you!";
     document.getElementById("submit-status").className = "success";
