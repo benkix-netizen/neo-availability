@@ -46,12 +46,20 @@
     color: var(--text); font-size: 0.95rem;
   }
 
-  .view-toggle { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--card-border); border-radius: 10px; padding: 4px; }
-  .view-toggle button {
-    border: none; background: transparent; color: var(--text-dim);
-    padding: 6px 14px; border-radius: 7px; font-size: 0.88rem; cursor: pointer; font-weight: 600;
+  .month-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .month-arrow {
+    flex-shrink: 0; width: 34px; height: 34px; font-size: 15px; border: 1px solid var(--card-border);
+    border-radius: 999px; cursor: pointer; background: var(--card);
+    color: var(--accent); font-family: inherit; transition: all 0.12s;
   }
-  .view-toggle button.active { background: var(--accent); color: #101405; }
+  .month-arrow:hover { background: var(--accent); color: #101405; }
+  .month-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+  .month-chip {
+    padding: 6px 16px; font-size: 0.85rem; border: 1px solid var(--card-border);
+    border-radius: 999px; cursor: pointer; background: var(--card);
+    color: var(--text-dim); font-family: inherit; transition: all 0.12s;
+  }
+  .month-chip.active { background: var(--accent); border-color: var(--accent); color: #101405; font-weight: 600; }
 
   .event-card {
     background: var(--card); border: 1px solid var(--card-border);
@@ -81,7 +89,7 @@
 
 <header>
   <h1>Neo</h1>
-  <p>Upcoming roster</p>
+  <p>Roster</p>
   <a class="form-link" href="index.html">Submit Availability →</a>
 </header>
 
@@ -91,10 +99,12 @@
     <select id="crew-picker">
       <option value="">Everyone</option>
     </select>
-    <div class="view-toggle">
-      <button type="button" id="view-upcoming" class="active">Upcoming</button>
-      <button type="button" id="view-past">Past</button>
-    </div>
+  </div>
+
+  <div class="month-nav">
+    <button class="month-arrow" id="month-prev" aria-label="Previous month">‹</button>
+    <div class="month-picker" id="month-picker"></div>
+    <button class="month-arrow" id="month-next" aria-label="Next month">›</button>
   </div>
 
   <div id="event-list"></div>
@@ -200,22 +210,6 @@ function parseMonthGrid(rows) {
   return slots;
 }
 
-// Rolling ~9-month window: 2 months back through 6 months ahead, clamped to
-// not go earlier than Neo's own launch month -- bounds the number of tabs
-// fetched instead of always starting from July 2026 once years have passed.
-function monthsInRange() {
-  const now = new Date();
-  const launch = new Date(2026, 6, 1);
-  const rangeStart = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-  const first = rangeStart < launch ? launch : rangeStart;
-  const months = [];
-  for (let i = 0; i < 9; i++) {
-    const d = new Date(first.getFullYear(), first.getMonth() + i, 1);
-    months.push({ monthIdx: d.getMonth(), year: d.getFullYear() });
-  }
-  return months;
-}
-
 // gviz silently falls back to the spreadsheet's FIRST tab when a requested
 // sheet name doesn't exist (rather than erroring), so a plain fetch-succeeded
 // check isn't enough -- a not-yet-created future month would otherwise render
@@ -226,16 +220,10 @@ function monthGridMatches(rows, monthIdx, year) {
   return title.toLowerCase() === `${MONTHS[monthIdx]} ${year}`.toLowerCase();
 }
 
-async function fetchAllSlots() {
-  const months = monthsInRange();
-  const results = await Promise.all(months.map(({ monthIdx, year }) => fetchCsvBySheetName(tabName(monthIdx, year))));
-  const slots = [];
-  results.forEach((rows, i) => {
-    const { monthIdx, year } = months[i];
-    if (rows.length === 0 || !monthGridMatches(rows, monthIdx, year)) return;
-    slots.push(...parseMonthGrid(rows));
-  });
-  return slots;
+async function fetchMonthSlots(monthIdx, year) {
+  const rows = await fetchCsvBySheetName(tabName(monthIdx, year));
+  if (rows.length === 0 || !monthGridMatches(rows, monthIdx, year)) return null;
+  return parseMonthGrid(rows);
 }
 
 async function fetchCrew() {
@@ -256,20 +244,13 @@ async function fetchCrew() {
   return { names: [...names].sort(), emailMap };
 }
 
-function groupIntoEvents(slots, mode) {
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+function groupIntoEvents(slots) {
   const byDate = {};
   slots.forEach(s => {
-    const isPast = s.date < today;
-    if (mode === "past" && !isPast) return;
-    if (mode === "upcoming" && isPast) return;
     if (!byDate[s.date]) byDate[s.date] = { date: s.date, slots: [] };
     byDate[s.date].slots.push(s);
   });
-  const events = Object.values(byDate);
-  return mode === "past"
-    ? events.sort((a, b) => b.date.localeCompare(a.date))
-    : events.sort((a, b) => a.date.localeCompare(b.date));
+  return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function escapeHtml(str) {
@@ -395,11 +376,11 @@ function timeSortKey(str) {
 
 // ---- rendering ----
 
-let allSlots = [];
 let allEvents = [];
 let emailMap = {};
 let selectedName = "";
-let viewMode = "upcoming";
+let currentMonthIdx = null;
+let currentYear = null;
 
 function renderRoleTable(slots, roleSet, caption) {
   const rows = slots.filter(s => roleSet.includes(s.role)).slice().sort((a, b) => {
@@ -441,7 +422,7 @@ function renderRoleTable(slots, roleSet, caption) {
 function render() {
   const listEl = document.getElementById("event-list");
   if (allEvents.length === 0) {
-    listEl.innerHTML = `<div class="empty-state">No ${viewMode === "past" ? "past" : "upcoming"} Neo nights on the roster.</div>`;
+    listEl.innerHTML = `<div class="empty-state">No Neo roster for ${MONTHS[currentMonthIdx]} ${currentYear} yet.</div>`;
     return;
   }
 
@@ -463,20 +444,51 @@ function render() {
   });
 }
 
-function setViewMode(mode) {
-  viewMode = mode;
-  document.getElementById("view-upcoming").classList.toggle("active", mode === "upcoming");
-  document.getElementById("view-past").classList.toggle("active", mode === "past");
-  allEvents = groupIntoEvents(allSlots, viewMode);
+// Rebuilds the chip row centered on whatever month is being loaded (not
+// fixed to "today") -- otherwise the chips go stale once Prev/Next moves
+// past the original window.
+function buildMonthChips(centerMonthIdx, centerYear) {
+  const wrap = document.getElementById("month-picker");
+  wrap.innerHTML = "";
+  for (let i = -1; i <= 2; i++) {
+    let idx = centerMonthIdx + i;
+    let year = centerYear;
+    if (idx < 0) { idx += 12; year -= 1; }
+    if (idx > 11) { idx -= 12; year += 1; }
+    const label = `${MONTHS[idx]} ${year}`;
+
+    const btn = document.createElement("button");
+    btn.className = "month-chip" + (i === 0 ? " active" : "");
+    btn.textContent = label;
+    btn.onclick = () => loadMonth(idx, year);
+    wrap.appendChild(btn);
+  }
+}
+
+function stepMonth(delta) {
+  let idx = currentMonthIdx + delta;
+  let year = currentYear;
+  if (idx < 0) { idx += 12; year -= 1; }
+  if (idx > 11) { idx -= 12; year += 1; }
+  loadMonth(idx, year);
+}
+
+async function loadMonth(monthIdx, year) {
+  buildMonthChips(monthIdx, year);
+  currentMonthIdx = monthIdx;
+  currentYear = year;
+
+  const listEl = document.getElementById("event-list");
+  listEl.innerHTML = `<div class="empty-state">Loading ${MONTHS[monthIdx]} ${year}…</div>`;
+
+  const slots = await fetchMonthSlots(monthIdx, year);
+  allEvents = slots ? groupIntoEvents(slots) : [];
   render();
 }
 
 async function main() {
-  document.getElementById("event-list").innerHTML = `<div class="empty-state">Loading roster…</div>`;
-  const [slots, crew] = await Promise.all([fetchAllSlots(), fetchCrew()]);
-  allSlots = slots;
+  const crew = await fetchCrew();
   emailMap = crew.emailMap;
-  allEvents = groupIntoEvents(allSlots, viewMode);
 
   const picker = document.getElementById("crew-picker");
   crew.names.forEach(name => {
@@ -490,10 +502,11 @@ async function main() {
     render();
   });
 
-  document.getElementById("view-upcoming").addEventListener("click", () => setViewMode("upcoming"));
-  document.getElementById("view-past").addEventListener("click", () => setViewMode("past"));
+  document.getElementById("month-prev").addEventListener("click", () => stepMonth(-1));
+  document.getElementById("month-next").addEventListener("click", () => stepMonth(1));
 
-  render();
+  const now = new Date();
+  await loadMonth(now.getMonth(), now.getFullYear());
 }
 
 main();
