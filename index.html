@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Neo — DJ Availability</title>
+<style>
+  :root {
+    --accent: #00ff9d;
+    --accent-dim: #0a4a33;
+    --bg: #060807;
+    --card: #0e1512;
+    --card-border: #163127;
+    --text: #eafff2;
+    --text-dim: #6fa38c;
+    --yes: #22c55e;
+    --maybe: #eab308;
+    --no: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 80px;
+  }
+  header {
+    padding: 28px 20px 20px;
+    text-align: center;
+    background: linear-gradient(135deg, var(--accent-dim), var(--bg));
+    border-bottom: 1px solid var(--card-border);
+  }
+  header h1 { margin: 0 0 4px; font-size: 1.6rem; letter-spacing: 0.5px; color: var(--accent); }
+  header p { margin: 0; color: var(--text-dim); font-size: 0.9rem; }
+  header a.roster-link {
+    display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 600;
+    color: var(--accent); text-decoration: none; letter-spacing: 0.3px;
+  }
+  header a.roster-link:hover { text-decoration: underline; }
+
+  .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+
+  label { display: block; font-size: 0.85rem; color: var(--text-dim); margin: 16px 0 6px; }
+  select, input[type="email"] {
+    width: 100%; padding: 12px; border-radius: 10px;
+    background: var(--card); border: 1px solid var(--card-border);
+    color: var(--text); font-size: 1rem;
+  }
+  button {
+    cursor: pointer; border: none; border-radius: 10px;
+    font-size: 1rem; font-weight: 600; padding: 14px;
+  }
+  .btn-primary {
+    width: 100%; margin-top: 24px;
+    background: var(--accent); color: #04231a;
+  }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  #status-msg { text-align: center; margin-top: 12px; font-size: 0.9rem; min-height: 1.2em; }
+  #status-msg.error { color: var(--no); }
+  #status-msg.success { color: var(--yes); }
+
+  .day-card {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 14px; padding: 16px; margin-bottom: 16px;
+  }
+  .day-card h3 { margin: 0 0 12px; font-size: 1.05rem; }
+
+  .slot-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; padding: 10px 0; border-top: 1px solid var(--card-border);
+  }
+  .slot-row:first-of-type { border-top: none; }
+  .slot-info { flex: 1; min-width: 0; }
+  .slot-time { font-weight: 600; font-size: 0.92rem; }
+  .slot-role { font-size: 0.78rem; color: var(--text-dim); }
+
+  .toggle-group { display: flex; gap: 6px; flex-shrink: 0; }
+  .toggle-btn {
+    padding: 8px 12px; border-radius: 8px; font-size: 0.8rem;
+    background: transparent; border: 1px solid var(--card-border); color: var(--text-dim);
+  }
+  .toggle-btn[data-val="yes"].active { background: var(--yes); color: #06210f; border-color: var(--yes); }
+  .toggle-btn[data-val="maybe"].active { background: var(--maybe); color: #2b2100; border-color: var(--maybe); }
+  .toggle-btn[data-val="no"].active { background: var(--no); color: #2b0808; border-color: var(--no); }
+
+  .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
+  #form-view { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Neo</h1>
+  <p>Friday night DJ availability</p>
+  <a class="roster-link" href="roster.html">View Roster →</a>
+</header>
+
+<div class="container">
+
+  <div id="name-view">
+    <label for="crew-name">Your name</label>
+    <select id="crew-name">
+      <option value="">Select your name…</option>
+    </select>
+
+    <label for="crew-email">Email</label>
+    <input type="email" id="crew-email" placeholder="you@example.com" />
+
+    <button class="btn-primary" id="continue-btn" disabled>Continue</button>
+    <div id="status-msg"></div>
+  </div>
+
+  <div id="form-view">
+    <div id="day-list"></div>
+    <button class="btn-primary" id="submit-btn">Submit Availability</button>
+    <div id="submit-status"></div>
+  </div>
+
+</div>
+
+<script>
+const SHEET_ID = "1hw_Pa2fzNC18LoXNs2BPZA1caFtNi2-gxE7wYj9AhXs";
+// Filled in once the Apps Script backend is deployed (see the .gs file handed
+// over alongside this repo) -- until then, submissions will fail silently.
+const SCRIPT_URL = "REPLACE_WITH_APPS_SCRIPT_EXEC_URL";
+const CREW_SHEET_NAME = "Crew";
+const SLOTS_SHEET_NAME = "Slots";
+const AVAILABILITY_SHEET_NAME = "Availability";
+const TZ = "Australia/Melbourne";
+
+// Neo runs every Friday starting this date. The form always shows the next
+// UPCOMING_WEEKS Fridays from whichever is later -- today or this start date
+// -- so it keeps working on its own after the season kicks off, no redeploy
+// needed each week.
+const START_ISO = "2026-07-31";
+const UPCOMING_WEEKS = 8;
+
+const DJ_SLOT_ROLES = ["Open", "Premain", "Main 1", "Main 2", "Close"];
+const MEDIA_ROLES = ["Photographer", "Social Media", "Videographer"];
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r.length === 1 && r[0] !== ''));
+}
+
+function indexHeader(headerRow) {
+  const idx = {};
+  headerRow.forEach((h, i) => { idx[h.trim()] = i; });
+  return idx;
+}
+
+async function fetchCsvBySheetName(name) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&headers=1&_=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  const text = await res.text();
+  if (/<html/i.test(text.slice(0, 200))) return [];
+  return parseCsv(text);
+}
+
+async function fetchCrewRoster() {
+  const rows = await fetchCsvBySheetName(CREW_SHEET_NAME);
+  if (rows.length < 2) throw new Error(`No crew found in the "${CREW_SHEET_NAME}" tab.`);
+  const idx = indexHeader(rows[0]);
+  const crew = [];
+  rows.slice(1).forEach(r => {
+    const name = (r[idx["Name"]] || "").trim();
+    if (!name) return;
+    const active = (r[idx["Active"]] || "").trim().toUpperCase();
+    if (active === "FALSE") return;
+    crew.push({ name, role: (r[idx["Role"]] || "").trim() });
+  });
+  return crew;
+}
+
+async function fetchSlots() {
+  const rows = await fetchCsvBySheetName(SLOTS_SHEET_NAME);
+  if (rows.length < 2) throw new Error(`No slots found in the "${SLOTS_SHEET_NAME}" tab.`);
+  const idx = indexHeader(rows[0]);
+  return rows.slice(1).map(r => ({
+    role: (r[idx["Role"]] || "").trim(),
+    start: (r[idx["Start"]] || "").trim(),
+    end: (r[idx["End"]] || "").trim()
+  })).filter(s => s.role);
+}
+
+async function fetchExistingAvailability(name) {
+  const rows = await fetchCsvBySheetName(AVAILABILITY_SHEET_NAME);
+  if (rows.length < 2) return {};
+  const idx = indexHeader(rows[0]);
+  const out = {};
+  rows.slice(1).forEach(r => {
+    if ((r[idx["Name"]] || "").trim() !== name) return;
+    const key = [(r[idx["Date"]] || "").trim(), (r[idx["Role"]] || "").trim()].join("|");
+    out[key] = (r[idx["Availability"]] || "").trim().toLowerCase();
+  });
+  return out;
+}
+
+// Slots this crew member should be asked about, based on their Crew Role.
+// DJs answer the 5 time-based DJ slots; MC answers just the MC slot; each
+// media role (Photographer/Social Media/Videographer) answers only its own
+// single whole-night slot, not the others.
+function slotsForRole(role, allSlots) {
+  if (role === "DJ") return allSlots.filter(s => DJ_SLOT_ROLES.includes(s.role));
+  if (role === "MC") return allSlots.filter(s => s.role === "MC");
+  if (MEDIA_ROLES.includes(role)) return allSlots.filter(s => s.role === role);
+  return [];
+}
+
+function todayIso() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: TZ }); // en-CA => YYYY-MM-DD
+}
+
+function nextFridayOnOrAfter(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  while (dt.getDay() !== 5) dt.setDate(dt.getDate() + 1);
+  return dt;
+}
+
+function isoFromDate(dt) {
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+function upcomingFridayDates() {
+  const baseIso = todayIso() > START_ISO ? todayIso() : START_ISO;
+  const first = nextFridayOnOrAfter(baseIso);
+  const out = [];
+  for (let i = 0; i < UPCOMING_WEEKS; i++) {
+    const d = new Date(first);
+    d.setDate(first.getDate() + 7 * i);
+    out.push(isoFromDate(d));
+  }
+  return out;
+}
+
+function formatDateDisplay(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+let crewRoster = [];
+let allSlots = [];
+let selectedName = "";
+const answers = {}; // "date|role" -> "yes"|"maybe"|"no"
+const slotMeta = {}; // "date|role" -> { date, role, start, end }
+
+function slotKey(date, role) {
+  return date + "|" + role;
+}
+
+async function init() {
+  try {
+    [crewRoster, allSlots] = await Promise.all([fetchCrewRoster(), fetchSlots()]);
+  } catch (err) {
+    document.getElementById("status-msg").textContent = "Couldn't load the crew list. Please refresh.";
+    document.getElementById("status-msg").className = "error";
+    return;
+  }
+
+  const names = [...new Set(crewRoster.map(c => c.name))].sort();
+  const select = document.getElementById("crew-name");
+  names.forEach(name => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    select.appendChild(opt);
+  });
+
+  select.addEventListener("change", updateContinueState);
+  document.getElementById("crew-email").addEventListener("input", updateContinueState);
+  document.getElementById("continue-btn").addEventListener("click", showForm);
+  document.getElementById("submit-btn").addEventListener("click", submitForm);
+}
+
+function updateContinueState() {
+  const name = document.getElementById("crew-name").value;
+  const email = document.getElementById("crew-email").value.trim();
+  document.getElementById("continue-btn").disabled = !(name && email.includes("@"));
+}
+
+async function showForm() {
+  selectedName = document.getElementById("crew-name").value;
+  const crewMember = crewRoster.find(c => c.name === selectedName);
+  const myRole = crewMember ? crewMember.role : "";
+  const mySlots = slotsForRole(myRole, allSlots);
+
+  const existing = await fetchExistingAvailability(selectedName);
+
+  document.getElementById("name-view").style.display = "none";
+  document.getElementById("form-view").style.display = "block";
+
+  const listEl = document.getElementById("day-list");
+  listEl.innerHTML = "";
+
+  if (mySlots.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">No slots are set up for your role yet — check with the roster owner.</div>';
+    document.getElementById("submit-btn").style.display = "none";
+    return;
+  }
+
+  const fridays = upcomingFridayDates();
+
+  fridays.forEach(date => {
+    const card = document.createElement("div");
+    card.className = "day-card";
+    card.innerHTML = `<h3>${escapeHtml(formatDateDisplay(date))}</h3>`;
+
+    mySlots.forEach(s => {
+      const key = slotKey(date, s.role);
+      slotMeta[key] = { date, role: s.role, start: s.start, end: s.end };
+      if (existing[key]) answers[key] = existing[key];
+
+      const row = document.createElement("div");
+      row.className = "slot-row";
+      const timeText = s.end ? `${escapeHtml(s.start)} – ${escapeHtml(s.end)}` : escapeHtml(s.start);
+      row.innerHTML = `
+        <div class="slot-info">
+          <div class="slot-time">${timeText}</div>
+          <div class="slot-role">${escapeHtml(s.role)}</div>
+        </div>
+        <div class="toggle-group" data-key="${key}">
+          <button type="button" class="toggle-btn" data-val="yes">Yes</button>
+          <button type="button" class="toggle-btn" data-val="maybe">Maybe</button>
+          <button type="button" class="toggle-btn" data-val="no">No</button>
+        </div>
+      `;
+      card.appendChild(row);
+    });
+
+    listEl.appendChild(card);
+  });
+
+  document.querySelectorAll(".toggle-group").forEach(group => {
+    const key = group.dataset.key;
+    group.querySelectorAll(".toggle-btn").forEach(btn => {
+      if (answers[key] === btn.dataset.val) btn.classList.add("active");
+      btn.addEventListener("click", () => {
+        answers[key] = btn.dataset.val;
+        group.querySelectorAll(".toggle-btn").forEach(b => b.classList.toggle("active", b === btn));
+      });
+    });
+  });
+}
+
+async function submitForm() {
+  const keys = Object.keys(slotMeta);
+  const unanswered = keys.filter(k => !answers[k]);
+  if (unanswered.length > 0) {
+    document.getElementById("submit-status").textContent = "Please answer every slot before submitting.";
+    document.getElementById("submit-status").className = "error";
+    return;
+  }
+
+  const slots = keys.map(k => {
+    const m = slotMeta[k];
+    return { date: m.date, role: m.role, availability: answers[k] };
+  });
+
+  const email = document.getElementById("crew-email").value.trim();
+  document.getElementById("submit-btn").disabled = true;
+
+  try {
+    await fetch(SCRIPT_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: selectedName, email, slots })
+    });
+    document.getElementById("submit-status").textContent = "Availability submitted — thank you!";
+    document.getElementById("submit-status").className = "success";
+  } catch (err) {
+    document.getElementById("submit-status").textContent = "Something went wrong submitting. Please try again.";
+    document.getElementById("submit-status").className = "error";
+    document.getElementById("submit-btn").disabled = false;
+  }
+}
+
+init();
+</script>
+</body>
+</html>

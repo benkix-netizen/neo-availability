@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Neo — Roster</title>
+<style>
+  :root {
+    --accent: #00ff9d;
+    --accent-dim: #0a4a33;
+    --bg: #060807;
+    --card: #0e1512;
+    --card-border: #163127;
+    --text: #eafff2;
+    --text-dim: #6fa38c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding-bottom: 60px;
+  }
+  header {
+    padding: 28px 20px 20px;
+    text-align: center;
+    background: linear-gradient(135deg, var(--accent-dim), var(--bg));
+    border-bottom: 1px solid var(--card-border);
+  }
+  header h1 { margin: 0 0 4px; font-size: 1.6rem; letter-spacing: 0.5px; color: var(--accent); }
+  header p { margin: 0; color: var(--text-dim); font-size: 0.9rem; }
+  header a.form-link {
+    display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 600;
+    color: var(--accent); text-decoration: none; letter-spacing: 0.3px;
+  }
+  header a.form-link:hover { text-decoration: underline; }
+
+  .container { max-width: 760px; margin: 0 auto; padding: 20px; }
+
+  .picker-row { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+  .picker-row label { font-size: 0.85rem; color: var(--text-dim); }
+  select {
+    padding: 10px; border-radius: 10px;
+    background: var(--card); border: 1px solid var(--card-border);
+    color: var(--text); font-size: 0.95rem;
+  }
+
+  .view-toggle { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--card-border); border-radius: 10px; padding: 4px; }
+  .view-toggle button {
+    border: none; background: transparent; color: var(--text-dim);
+    padding: 6px 14px; border-radius: 7px; font-size: 0.88rem; cursor: pointer; font-weight: 600;
+  }
+  .view-toggle button.active { background: var(--accent); color: #04231a; }
+
+  .event-card {
+    background: var(--card); border: 1px solid var(--card-border);
+    border-radius: 14px; padding: 18px; margin-bottom: 18px;
+  }
+  .event-card h2 { margin: 0 0 10px; font-size: 1.15rem; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.84rem; }
+  table caption {
+    text-align: left; font-size: 0.78rem; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 6px; caption-side: top;
+  }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--card-border); }
+  th { color: var(--text-dim); font-weight: 500; font-size: 0.78rem; }
+  th.time-col, td.time-col { font-size: 0.8rem; white-space: nowrap; }
+  tr.mine td { background: rgba(0, 255, 157, 0.12); font-weight: 600; }
+  .assigned-blank { color: var(--text-dim); font-style: italic; }
+  .cal-btn {
+    background: var(--accent); color: #04231a; border: none; border-radius: 6px;
+    padding: 4px 10px; font-size: 0.75rem; cursor: pointer; font-weight: 600;
+  }
+
+  .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Neo</h1>
+  <p>Upcoming roster</p>
+  <a class="form-link" href="index.html">Submit Availability →</a>
+</header>
+
+<div class="container">
+  <div class="picker-row">
+    <label for="crew-picker">Highlight my slots:</label>
+    <select id="crew-picker">
+      <option value="">Everyone</option>
+    </select>
+    <div class="view-toggle">
+      <button type="button" id="view-upcoming" class="active">Upcoming</button>
+      <button type="button" id="view-past">Past</button>
+    </div>
+  </div>
+
+  <div id="event-list"></div>
+</div>
+
+<script>
+const SHEET_ID = "1hw_Pa2fzNC18LoXNs2BPZA1caFtNi2-gxE7wYj9AhXs";
+const CREW_SHEET_NAME = "Crew";
+const TZ = "Australia/Melbourne";
+const VENUE_NAME = "Neo";
+const ORGANIZER_EMAIL = "benki@redlineartistry.com";
+
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+// Fixed rendering order -- MC + the 5 time-based DJ slots make up
+// "Entertainment"; the 3 whole-night roles make up "Media".
+const ENTERTAINMENT_ROLES = ["MC", "Open", "Premain", "Main 1", "Main 2", "Close"];
+const MEDIA_ROLES = ["Photographer", "Social Media", "Videographer"];
+const ALL_SLOT_ROLES = [...ENTERTAINMENT_ROLES, ...MEDIA_ROLES];
+
+function tabName(monthIdx, year) {
+  return `${MONTH_ABBR[monthIdx].toUpperCase()} ${String(year).slice(-2)}`;
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+// Returns [] for a tab name that doesn't exist yet -- gviz serves an HTML
+// error page (not CSV) in that case, which we treat as "nothing there".
+async function fetchCsvBySheetName(name) {
+  try {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&headers=0&_=${Date.now()}`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return [];
+    const rows = parseCsv(await res.text());
+    if (rows.length && /<html/i.test(rows[0][0] || "")) return [];
+    return rows;
+  } catch (err) {
+    return [];
+  }
+}
+
+function indexHeader(headerRow) {
+  const idx = {};
+  headerRow.forEach((h, i) => { idx[String(h).trim()] = i; });
+  return idx;
+}
+
+const DATE_CELL_RE = /^(\d{2})-([A-Za-z]{3})-(\d{2})$/;
+
+function parseGridDateCell(cell) {
+  const m = DATE_CELL_RE.exec(String(cell || "").trim());
+  if (!m) return null;
+  const day = parseInt(m[1], 10);
+  const monthIdx = MONTH_ABBR.indexOf(m[2]);
+  if (monthIdx === -1) return null;
+  const year = 2000 + parseInt(m[3], 10);
+  return `${year}-${String(monthIdx + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+// Each monthly tab is a hand-formatted grid: a week-header row (col A blank,
+// cols B-D all repeating the same "DD-Mon-YY" date), followed by role rows
+// (Role, Start, End, Assigned) until the next week-header row. Section-marker
+// rows ("", "", "", "DJ") and ("Media", "", "", "Staff") don't match any known
+// role name, so they're skipped naturally rather than needing special-casing.
+function parseMonthGrid(rows) {
+  const slots = [];
+  let currentDate = null;
+  rows.forEach(r => {
+    const a = (r[0] || "").trim();
+    const b = (r[1] || "").trim();
+    const c = (r[2] || "").trim();
+    const d = (r[3] || "").trim();
+    if (a === "" && b && b === c && c === d && parseGridDateCell(b)) {
+      currentDate = parseGridDateCell(b);
+      return;
+    }
+    if (!currentDate) return;
+    if (ALL_SLOT_ROLES.includes(a)) {
+      slots.push({ date: currentDate, role: a, start: b, end: c, assigned: d });
+    }
+  });
+  return slots;
+}
+
+// Rolling ~9-month window: 2 months back through 6 months ahead, clamped to
+// not go earlier than Neo's own launch month -- bounds the number of tabs
+// fetched instead of always starting from July 2026 once years have passed.
+function monthsInRange() {
+  const now = new Date();
+  const launch = new Date(2026, 6, 1);
+  const rangeStart = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  const first = rangeStart < launch ? launch : rangeStart;
+  const months = [];
+  for (let i = 0; i < 9; i++) {
+    const d = new Date(first.getFullYear(), first.getMonth() + i, 1);
+    months.push({ monthIdx: d.getMonth(), year: d.getFullYear() });
+  }
+  return months;
+}
+
+async function fetchAllSlots() {
+  const months = monthsInRange();
+  const results = await Promise.all(months.map(({ monthIdx, year }) => fetchCsvBySheetName(tabName(monthIdx, year))));
+  const slots = [];
+  results.forEach(rows => slots.push(...parseMonthGrid(rows)));
+  return slots;
+}
+
+async function fetchCrew() {
+  const rows = await fetchCsvBySheetName(CREW_SHEET_NAME);
+  if (rows.length < 2) return { names: [], emailMap: {} };
+  const idx = indexHeader(rows[0]);
+  const names = new Set();
+  const emailMap = {};
+  rows.slice(1).forEach(r => {
+    const name = (r[idx["Name"]] || "").trim();
+    if (!name) return;
+    const active = (r[idx["Active"]] || "").trim().toUpperCase();
+    if (active === "FALSE") return;
+    names.add(name);
+    const email = (r[idx["Email"]] || "").trim();
+    if (email) emailMap[name] = email;
+  });
+  return { names: [...names].sort(), emailMap };
+}
+
+function groupIntoEvents(slots, mode) {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: TZ });
+  const byDate = {};
+  slots.forEach(s => {
+    const isPast = s.date < today;
+    if (mode === "past" && !isPast) return;
+    if (mode === "upcoming" && isPast) return;
+    if (!byDate[s.date]) byDate[s.date] = { date: s.date, slots: [] };
+    byDate[s.date].slots.push(s);
+  });
+  const events = Object.values(byDate);
+  return mode === "past"
+    ? events.sort((a, b) => b.date.localeCompare(a.date))
+    : events.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function formatDateDisplay(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "long" });
+}
+
+// ---- .ics calendar export ----
+
+function parseClockFlexible(str) {
+  str = String(str).trim();
+  let m = /^(\d{1,2}):(\d{2})$/.exec(str);
+  if (m) {
+    const hour = parseInt(m[1], 10);
+    const minute = parseInt(m[2], 10);
+    if (hour >= 0 && hour <= 23) return { hour, minute };
+  }
+  return null;
+}
+
+// Nightclub-hours rule: a time before 6am belongs to the night after the
+// slot's own Date (e.g. Close at 02:00 on a Friday means 2am Saturday).
+function clockToDate(clock, dateIso) {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  const dayOffset = clock.hour < 6 ? 1 : 0;
+  return new Date(y, m - 1, d + dayOffset, clock.hour, clock.minute, 0, 0);
+}
+
+function tzOffsetMinutes(date, timeZone) {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit"
+  });
+  const parts = dtf.formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const hour = parts.hour === "24" ? "00" : parts.hour;
+  const asUTC = Date.UTC(parts.year, parts.month - 1, parts.day, hour, parts.minute, parts.second);
+  return (asUTC - date.getTime()) / 60000;
+}
+
+function melbourneLocalToUtc(localDate) {
+  const guessUtc = new Date(Date.UTC(
+    localDate.getFullYear(), localDate.getMonth(), localDate.getDate(),
+    localDate.getHours(), localDate.getMinutes(), 0
+  ));
+  const offsetMin = tzOffsetMinutes(guessUtc, TZ);
+  return new Date(guessUtc.getTime() - offsetMin * 60000);
+}
+
+function icsDate(date) {
+  const pad = n => String(n).padStart(2, "0");
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+}
+
+function icsEscape(str) {
+  return String(str || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+}
+
+function buildVevent(slot, name) {
+  const startClock = parseClockFlexible(slot.start);
+  if (!startClock) return null;
+  // Close has no End time in the sheet -- default to a 2-hour block so it's
+  // still a usable calendar entry instead of a zero-length one.
+  const endClock = parseClockFlexible(slot.end) || { hour: (startClock.hour + 2) % 24, minute: startClock.minute };
+
+  const startLocal = clockToDate(startClock, slot.date);
+  let endLocal = clockToDate(endClock, slot.date);
+  if (endLocal <= startLocal) endLocal = new Date(endLocal.getTime() + 24 * 60 * 60 * 1000);
+
+  const startUtc = melbourneLocalToUtc(startLocal);
+  const endUtc = melbourneLocalToUtc(endLocal);
+
+  const uid = `${slot.date}-${slot.role}-${slot.start}-${icsEscape(name)}@neo.redlinerostering`.replace(/\s+/g, "");
+  return [
+    "BEGIN:VEVENT",
+    `UID:${uid}`,
+    `DTSTAMP:${icsDate(new Date())}`,
+    `DTSTART:${icsDate(startUtc)}`,
+    `DTEND:${icsDate(endUtc)}`,
+    `SUMMARY:${icsEscape(VENUE_NAME)} — ${icsEscape(slot.role)}`,
+    `LOCATION:${icsEscape(VENUE_NAME)}`,
+    "END:VEVENT"
+  ].join("\r\n");
+}
+
+function buildIcs(vevents) {
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Redline Neo//Roster//EN", ...vevents, "END:VCALENDAR"].join("\r\n");
+}
+
+function downloadIcs(filename, vevents) {
+  const blob = new Blob([buildIcs(vevents)], { type: "text/calendar" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function formatShortTime(str) {
+  const clock = parseClockFlexible(str);
+  if (!clock) return escapeHtml(str);
+  let h = clock.hour % 12;
+  if (h === 0) h = 12;
+  const suffix = clock.hour < 12 ? "am" : "pm";
+  const mins = clock.minute ? ":" + String(clock.minute).padStart(2, "0") : "";
+  return `${h}${mins}${suffix}`;
+}
+
+function timeSortKey(str) {
+  const clock = parseClockFlexible(str);
+  if (!clock) return 0;
+  const h = clock.hour < 6 ? clock.hour + 24 : clock.hour;
+  return h * 60 + clock.minute;
+}
+
+// ---- rendering ----
+
+let allSlots = [];
+let allEvents = [];
+let emailMap = {};
+let selectedName = "";
+let viewMode = "upcoming";
+
+function renderRoleTable(slots, roleSet, caption) {
+  const rows = slots.filter(s => roleSet.includes(s.role)).slice().sort((a, b) => {
+    const roleDiff = roleSet.indexOf(a.role) - roleSet.indexOf(b.role);
+    return roleDiff !== 0 ? roleDiff : timeSortKey(a.start) - timeSortKey(b.start);
+  });
+  if (rows.length === 0) return "";
+
+  const cells = rows.map(s => {
+    const mine = selectedName && s.assigned === selectedName;
+    const assignedCell = s.assigned
+      ? escapeHtml(s.assigned)
+      : '<span class="assigned-blank">unassigned</span>';
+    const calBtn = (mine && emailMap[selectedName])
+      ? `<button type="button" class="cal-btn" data-date="${escapeHtml(s.date)}" data-role="${escapeHtml(s.role)}" data-start="${escapeHtml(s.start)}">Add to Calendar</button>`
+      : "";
+    return `
+      <tr class="${mine ? "mine" : ""}">
+        <td class="time-col">${formatShortTime(s.start)}${s.end ? "–" + formatShortTime(s.end) : ""}</td>
+        <td>${escapeHtml(s.role)}</td>
+        <td>${assignedCell}</td>
+        <td>${calBtn}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <table>
+      <caption>${caption}</caption>
+      <thead><tr>
+        <th class="time-col">Time</th>
+        <th>Role</th>
+        <th>Assigned</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${cells}</tbody>
+    </table>`;
+}
+
+function render() {
+  const listEl = document.getElementById("event-list");
+  if (allEvents.length === 0) {
+    listEl.innerHTML = `<div class="empty-state">No ${viewMode === "past" ? "past" : "upcoming"} Neo nights on the roster.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = allEvents.map(ev => `
+    <div class="event-card">
+      <h2>${escapeHtml(formatDateDisplay(ev.date))}</h2>
+      ${renderRoleTable(ev.slots, ENTERTAINMENT_ROLES, "Entertainment")}
+      ${renderRoleTable(ev.slots, MEDIA_ROLES, "Media")}
+    </div>`).join("");
+
+  listEl.querySelectorAll(".cal-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const { date, role, start } = btn.dataset;
+      const ev = allEvents.find(e => e.date === date);
+      const slot = ev.slots.find(s => s.role === role && s.start === start);
+      const vevent = buildVevent(slot, selectedName);
+      if (vevent) downloadIcs(`Neo-${role.replace(/\s+/g, "-")}-${date}.ics`, [vevent]);
+    });
+  });
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
+  document.getElementById("view-upcoming").classList.toggle("active", mode === "upcoming");
+  document.getElementById("view-past").classList.toggle("active", mode === "past");
+  allEvents = groupIntoEvents(allSlots, viewMode);
+  render();
+}
+
+async function main() {
+  document.getElementById("event-list").innerHTML = `<div class="empty-state">Loading roster…</div>`;
+  const [slots, crew] = await Promise.all([fetchAllSlots(), fetchCrew()]);
+  allSlots = slots;
+  emailMap = crew.emailMap;
+  allEvents = groupIntoEvents(allSlots, viewMode);
+
+  const picker = document.getElementById("crew-picker");
+  crew.names.forEach(name => {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    picker.appendChild(opt);
+  });
+  picker.addEventListener("change", () => {
+    selectedName = picker.value;
+    render();
+  });
+
+  document.getElementById("view-upcoming").addEventListener("click", () => setViewMode("upcoming"));
+  document.getElementById("view-past").addEventListener("click", () => setViewMode("past"));
+
+  render();
+}
+
+main();
+</script>
+</body>
+</html>
