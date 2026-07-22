@@ -216,11 +216,25 @@ function monthsInRange() {
   return months;
 }
 
+// gviz silently falls back to the spreadsheet's FIRST tab when a requested
+// sheet name doesn't exist (rather than erroring), so a plain fetch-succeeded
+// check isn't enough -- a not-yet-created future month would otherwise render
+// whatever tab happens to be first. The title cell (e.g. "November 2026")
+// must actually match the requested month.
+function monthGridMatches(rows, monthIdx, year) {
+  const title = (rows[0] && rows[0][0] || "").trim();
+  return title.toLowerCase() === `${MONTHS[monthIdx]} ${year}`.toLowerCase();
+}
+
 async function fetchAllSlots() {
   const months = monthsInRange();
   const results = await Promise.all(months.map(({ monthIdx, year }) => fetchCsvBySheetName(tabName(monthIdx, year))));
   const slots = [];
-  results.forEach(rows => slots.push(...parseMonthGrid(rows)));
+  results.forEach((rows, i) => {
+    const { monthIdx, year } = months[i];
+    if (rows.length === 0 || !monthGridMatches(rows, monthIdx, year)) return;
+    slots.push(...parseMonthGrid(rows));
+  });
   return slots;
 }
 

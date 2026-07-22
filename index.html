@@ -195,6 +195,13 @@ async function fetchSlots() {
   const rows = await fetchCsvBySheetName(SLOTS_SHEET_NAME);
   if (rows.length < 2) throw new Error(`No slots found in the "${SLOTS_SHEET_NAME}" tab.`);
   const idx = indexHeader(rows[0]);
+  // gviz silently falls back to the spreadsheet's FIRST tab when a sheet
+  // name doesn't exist (rather than erroring) -- if the header row doesn't
+  // actually have a "Role" column, this isn't really the Slots tab, most
+  // likely because setupNeoSheet() hasn't been run yet.
+  if (idx["Role"] === undefined) {
+    throw new Error(`The "${SLOTS_SHEET_NAME}" tab doesn't exist yet -- run setupNeoSheet() from the Apps Script editor first.`);
+  }
   return rows.slice(1).map(r => ({
     role: (r[idx["Role"]] || "").trim(),
     start: (r[idx["Start"]] || "").trim(),
