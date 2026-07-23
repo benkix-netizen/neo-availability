@@ -223,13 +223,14 @@ async function fetchExistingAvailability(name) {
 }
 
 // Slots this crew member should be asked about, based on their Crew Role.
-// DJs answer the 5 time-based DJ slots; MC answers just the MC slot; each
-// media role (Photographer/Social Media/Videographer) answers only its own
-// single whole-night slot, not the others.
+// DJs answer the 5 time-based DJ slots; MC answers just the MC slot; Media
+// (one shared Role value covering Photographer/Social Media/Videographer)
+// answers all 3 media slots, since any of them could end up assigned to any
+// of those 3 roles for the night.
 function slotsForRole(role, allSlots) {
   if (role === "DJ") return allSlots.filter(s => DJ_SLOT_ROLES.includes(s.role));
   if (role === "MC") return allSlots.filter(s => s.role === "MC");
-  if (MEDIA_ROLES.includes(role)) return allSlots.filter(s => s.role === role);
+  if (role === "Media") return allSlots.filter(s => MEDIA_ROLES.includes(s.role));
   return [];
 }
 
