@@ -299,7 +299,7 @@ async function fetchMonthSlots(monthIdx, year) {
 }
 
 async function fetchCrew() {
-  const rows = await fetchCsvBySheetName(CREW_SHEET_NAME);
+  const rows = await fetchCsvBySheetName(CREW_SHEET_NAME, 1);
   if (rows.length < 2) return { names: [], emailMap: {} };
   const idx = indexHeader(rows[0]);
   const names = new Set();
