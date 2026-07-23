@@ -221,9 +221,14 @@ function parseCsv(text) {
 
 // Returns [] for a tab name that doesn't exist yet -- gviz serves an HTML
 // error page (not CSV) in that case, which we treat as "nothing there".
-async function fetchCsvBySheetName(name) {
+// headers=0 is used for the monthly grid tabs (they have no real header row
+// -- row 0 is a merged title cell, and columns are read positionally, not by
+// name), but a tab with genuine named headers over real Date-typed columns
+// (like SwapRequests) needs headers=1 -- otherwise gviz blanks out the
+// header cells it thinks are dates, breaking indexHeader()'s name lookup.
+async function fetchCsvBySheetName(name, headers = 0) {
   try {
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&headers=0&_=${Date.now()}`;
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(name)}&headers=${headers}&_=${Date.now()}`;
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return [];
     const rows = parseCsv(await res.text());
@@ -877,7 +882,7 @@ async function loadMonth(monthIdx, year) {
 }
 
 async function main() {
-  const [crew, swapRows] = await Promise.all([fetchCrew(), fetchCsvBySheetName(SWAP_SHEET_NAME)]);
+  const [crew, swapRows] = await Promise.all([fetchCrew(), fetchCsvBySheetName(SWAP_SHEET_NAME, 1)]);
   emailMap = crew.emailMap;
   currentSwapMap = parseSwapMap(swapRows);
 
