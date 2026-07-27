@@ -156,11 +156,13 @@ const CREW_SHEET_NAME = "Crew";
 const SLOTS_SHEET_NAME = "Slots";
 const AVAILABILITY_SHEET_NAME = "Availability";
 
-// Neo runs every Friday starting this date -- the month picker never offers
-// a month before this one, so the launch month itself (which only has its
-// last Friday actually running) is still the earliest selectable option.
+// Neo runs every Friday starting this date. The month picker never offers a
+// month before this one, and within the launch month itself, fridaysInMonth
+// still needs the exact ISO floor below -- otherwise July would incorrectly
+// show its 3 earlier Fridays too, which were never actual Neo nights.
 const LAUNCH_MONTH_IDX = 6; // July (0-indexed)
 const LAUNCH_YEAR = 2026;
+const LAUNCH_ISO = "2026-07-31";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const DJ_SLOT_ROLES = ["Open", "Premain", "Main 1", "Main 2", "Close"];
@@ -264,12 +266,14 @@ function isoFromDate(dt) {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 }
 
-// Every Friday that falls within the given calendar month.
+// Every Friday that falls within the given calendar month and on/after
+// Neo's actual launch date -- July 2026 has 5 Fridays, but only the last
+// one (31 Jul) was ever a real Neo night.
 function fridaysInMonth(monthIdx, year) {
   const out = [];
   const d = new Date(year, monthIdx, 1);
   while (d.getMonth() === monthIdx) {
-    if (d.getDay() === 5) out.push(isoFromDate(d));
+    if (d.getDay() === 5 && isoFromDate(d) >= LAUNCH_ISO) out.push(isoFromDate(d));
     d.setDate(d.getDate() + 1);
   }
   return out;
