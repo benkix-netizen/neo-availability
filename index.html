@@ -86,7 +86,21 @@
   .toggle-btn[data-val="no"].active { background: var(--no); color: #2b0808; border-color: var(--no); }
 
   .empty-state { text-align: center; color: var(--text-dim); padding: 40px 20px; }
-  #form-view { display: none; }
+  #month-view, #form-view { display: none; }
+
+  .month-picker { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .month-chip {
+    padding: 8px 18px; font-size: 0.9rem; border: 1px solid var(--card-border);
+    border-radius: 999px; cursor: pointer; background: var(--card);
+    color: var(--text-dim); font-family: inherit; transition: all 0.12s;
+  }
+  .month-chip.active { background: var(--accent); border-color: var(--accent); color: #101405; font-weight: 600; }
+
+  .back-link {
+    display: inline-block; margin-top: 16px; font-size: 0.85rem;
+    color: var(--accent); text-decoration: none; cursor: pointer;
+  }
+  .back-link:hover { text-decoration: underline; }
 
   .banner {
     width: 100%; max-width: 900px; height: auto;
@@ -119,10 +133,16 @@
     <div id="status-msg"></div>
   </div>
 
+  <div id="month-view">
+    <label>Month</label>
+    <div class="month-picker" id="month-picker"></div>
+  </div>
+
   <div id="form-view">
     <div id="day-list"></div>
     <button class="btn-primary" id="submit-btn">Submit Availability</button>
     <div id="submit-status"></div>
+    <a class="back-link" id="another-month-link" style="display:none">← Submit for a different month</a>
   </div>
 
 </div>
@@ -135,14 +155,13 @@ const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwjlqaI-WxEIf7gML88m
 const CREW_SHEET_NAME = "Crew";
 const SLOTS_SHEET_NAME = "Slots";
 const AVAILABILITY_SHEET_NAME = "Availability";
-const TZ = "Australia/Melbourne";
 
-// Neo runs every Friday starting this date. The form always shows the next
-// UPCOMING_WEEKS Fridays from whichever is later -- today or this start date
-// -- so it keeps working on its own after the season kicks off, no redeploy
-// needed each week.
-const START_ISO = "2026-07-31";
-const UPCOMING_WEEKS = 8;
+// Neo runs every Friday starting this date -- the month picker never offers
+// a month before this one, so the launch month itself (which only has its
+// last Friday actually running) is still the earliest selectable option.
+const LAUNCH_MONTH_IDX = 6; // July (0-indexed)
+const LAUNCH_YEAR = 2026;
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const DJ_SLOT_ROLES = ["Open", "Premain", "Main 1", "Main 2", "Close"];
 const MEDIA_ROLES = ["Photographer", "Social Media", "Videographer"];
@@ -241,29 +260,17 @@ function slotsForRole(role, allSlots) {
   return [];
 }
 
-function todayIso() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: TZ }); // en-CA => YYYY-MM-DD
-}
-
-function nextFridayOnOrAfter(iso) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  while (dt.getDay() !== 5) dt.setDate(dt.getDate() + 1);
-  return dt;
-}
-
 function isoFromDate(dt) {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 }
 
-function upcomingFridayDates() {
-  const baseIso = todayIso() > START_ISO ? todayIso() : START_ISO;
-  const first = nextFridayOnOrAfter(baseIso);
+// Every Friday that falls within the given calendar month.
+function fridaysInMonth(monthIdx, year) {
   const out = [];
-  for (let i = 0; i < UPCOMING_WEEKS; i++) {
-    const d = new Date(first);
-    d.setDate(first.getDate() + 7 * i);
-    out.push(isoFromDate(d));
+  const d = new Date(year, monthIdx, 1);
+  while (d.getMonth() === monthIdx) {
+    if (d.getDay() === 5) out.push(isoFromDate(d));
+    d.setDate(d.getDate() + 1);
   }
   return out;
 }
@@ -281,8 +288,9 @@ function escapeHtml(str) {
 let crewRoster = [];
 let allSlots = [];
 let selectedName = "";
-const answers = {}; // "date|role" -> "yes"|"maybe"|"no"
-const slotMeta = {}; // "date|role" -> { date, role, start, end }
+let selectedMonthLabel = "";
+let answers = {}; // "date|role" -> "yes"|"maybe"|"no"
+let slotMeta = {}; // "date|role" -> { date, role, start, end }
 
 function slotKey(date, role) {
   return date + "|" + role;
@@ -308,8 +316,9 @@ async function init() {
 
   select.addEventListener("change", updateContinueState);
   document.getElementById("crew-email").addEventListener("input", updateContinueState);
-  document.getElementById("continue-btn").addEventListener("click", showForm);
+  document.getElementById("continue-btn").addEventListener("click", goToMonthPicker);
   document.getElementById("submit-btn").addEventListener("click", submitForm);
+  document.getElementById("another-month-link").addEventListener("click", goToMonthPicker);
 }
 
 function updateContinueState() {
@@ -318,27 +327,74 @@ function updateContinueState() {
   document.getElementById("continue-btn").disabled = !(name && email.includes("@"));
 }
 
-async function showForm() {
+// Current month + next 4, never earlier than the launch month -- so the
+// launch month itself (which only has one Friday actually running) stays
+// selectable for as long as it's still the current or a future month.
+function buildMonthChips() {
+  const now = new Date();
+  const wrap = document.getElementById("month-picker");
+  wrap.innerHTML = "";
+  const launchOrdinal = LAUNCH_YEAR * 12 + LAUNCH_MONTH_IDX;
+
+  for (let i = 0; i <= 4; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const ordinal = d.getFullYear() * 12 + d.getMonth();
+    if (ordinal < launchOrdinal) continue;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "month-chip";
+    btn.textContent = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    btn.onclick = () => selectMonth(btn, d.getMonth(), d.getFullYear());
+    wrap.appendChild(btn);
+  }
+}
+
+function goToMonthPicker() {
   selectedName = document.getElementById("crew-name").value;
+  document.getElementById("name-view").style.display = "none";
+  document.getElementById("form-view").style.display = "none";
+  document.getElementById("month-view").style.display = "block";
+  document.getElementById("another-month-link").style.display = "none";
+  buildMonthChips();
+}
+
+async function selectMonth(btn, monthIdx, year) {
+  document.querySelectorAll(".month-chip").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  selectedMonthLabel = `${MONTHS[monthIdx]} ${year}`;
+  answers = {};
+  slotMeta = {};
+
   const crewMember = crewRoster.find(c => c.name === selectedName);
   const myRole = crewMember ? crewMember.role : "";
   const mySlots = slotsForRole(myRole, allSlots);
 
-  const existing = await fetchExistingAvailability(selectedName);
-
-  document.getElementById("name-view").style.display = "none";
+  document.getElementById("month-view").style.display = "none";
   document.getElementById("form-view").style.display = "block";
+  document.getElementById("submit-status").textContent = "";
+  document.getElementById("submit-status").className = "";
+  document.getElementById("submit-btn").disabled = false;
 
   const listEl = document.getElementById("day-list");
-  listEl.innerHTML = "";
+  listEl.innerHTML = `<div class="empty-state">Loading ${selectedMonthLabel}…</div>`;
 
   if (mySlots.length === 0) {
     listEl.innerHTML = '<div class="empty-state">No slots are set up for your role yet — check with the roster owner.</div>';
     document.getElementById("submit-btn").style.display = "none";
     return;
   }
+  document.getElementById("submit-btn").style.display = "block";
 
-  const fridays = upcomingFridayDates();
+  const existing = await fetchExistingAvailability(selectedName);
+  const fridays = fridaysInMonth(monthIdx, year);
+
+  listEl.innerHTML = "";
+  if (fridays.length === 0) {
+    listEl.innerHTML = `<div class="empty-state">No Fridays to show for ${selectedMonthLabel}.</div>`;
+    document.getElementById("submit-btn").style.display = "none";
+    return;
+  }
 
   fridays.forEach(date => {
     const card = document.createElement("div");
@@ -406,8 +462,9 @@ async function submitForm() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "submitAvailability", name: selectedName, email, slots })
     });
-    document.getElementById("submit-status").textContent = "Availability submitted — thank you!";
+    document.getElementById("submit-status").textContent = `Availability for ${selectedMonthLabel} submitted — thank you!`;
     document.getElementById("submit-status").className = "success";
+    document.getElementById("another-month-link").style.display = "inline-block";
   } catch (err) {
     document.getElementById("submit-status").textContent = "Something went wrong submitting. Please try again.";
     document.getElementById("submit-status").className = "error";
