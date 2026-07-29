@@ -166,7 +166,6 @@ const LAUNCH_ISO = "2026-07-31";
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const DJ_SLOT_ROLES = ["Open", "Premain", "Main 1", "Main 2", "Close"];
-const MEDIA_ROLES = ["Photographer", "Social Media", "Videographer"];
 
 function parseCsv(text) {
   const rows = [];
@@ -251,14 +250,18 @@ async function fetchExistingAvailability(name) {
 }
 
 // Slots this crew member should be asked about, based on their Crew Role.
-// DJs answer the 5 time-based DJ slots; MC answers just the MC slot; MEDIA
-// (one shared Role value covering Photographer/Social Media/Videographer)
-// answers all 3 media slots, since any of them could end up assigned to any
-// of those 3 roles for the night.
+// DJs answer the 5 time-based DJ slots individually (so a DJ can be
+// available for Open but not Close, for example), and MC answers just the
+// MC slot -- both care which specific slot they'd fill. MEDIA and STAFF
+// don't: the venue only needs to know whether that person is free at all
+// that night, not which of the 3 media roles or 8 staff positions they'd
+// end up in, so both return a single synthetic "free this Friday?" slot
+// instead of one row per underlying position.
 function slotsForRole(role, allSlots) {
   if (role === "DJ") return allSlots.filter(s => DJ_SLOT_ROLES.includes(s.role));
   if (role === "MC") return allSlots.filter(s => s.role === "MC");
-  if (role === "MEDIA") return allSlots.filter(s => MEDIA_ROLES.includes(s.role));
+  if (role === "MEDIA") return [{ role: "MEDIA", start: "", end: "" }];
+  if (role === "STAFF") return [{ role: "STAFF", start: "", end: "" }];
   return [];
 }
 
@@ -412,12 +415,14 @@ async function selectMonth(btn, monthIdx, year) {
 
       const row = document.createElement("div");
       row.className = "slot-row";
-      const timeText = s.end ? `${escapeHtml(s.start)} – ${escapeHtml(s.end)}` : escapeHtml(s.start);
+      // s.start is blank for MEDIA/STAFF's single synthetic slot (see
+      // slotsForRole) -- there's no specific time to show since the
+      // question isn't tied to one position.
+      const infoHtml = s.start
+        ? `<div class="slot-time">${s.end ? `${escapeHtml(s.start)} – ${escapeHtml(s.end)}` : escapeHtml(s.start)}</div><div class="slot-role">${escapeHtml(s.role)}</div>`
+        : `<div class="slot-time">Available this Friday?</div>`;
       row.innerHTML = `
-        <div class="slot-info">
-          <div class="slot-time">${timeText}</div>
-          <div class="slot-role">${escapeHtml(s.role)}</div>
-        </div>
+        <div class="slot-info">${infoHtml}</div>
         <div class="toggle-group" data-key="${key}">
           <button type="button" class="toggle-btn" data-val="yes">Yes</button>
           <button type="button" class="toggle-btn" data-val="maybe">Maybe</button>
