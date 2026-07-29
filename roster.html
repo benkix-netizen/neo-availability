@@ -75,6 +75,9 @@
     border-radius: 14px; padding: 18px; margin-bottom: 18px;
   }
   .event-card h2 { margin: 0 0 10px; font-size: 1.15rem; }
+  .section-group { margin-top: 14px; }
+  .section-group:first-of-type { margin-top: 2px; }
+  .section-heading { font-size: 0.95rem; font-weight: 700; color: var(--accent); margin: 0 0 2px; letter-spacing: 0.02em; }
 
   table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.84rem; }
   table caption {
@@ -195,10 +198,17 @@ const MONTHS = ["January","February","March","April","May","June","July","August
 const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
 // Fixed rendering order -- MC + the 5 time-based DJ slots make up
-// "Entertainment"; the 3 whole-night roles make up "Media".
+// "Entertainment"; the 3 whole-night roles make up "Media", grouped under
+// the same "Entertainment" section. The 8 door/venue roles make up
+// "Staff", rendered as its own separate section.
 const ENTERTAINMENT_ROLES = ["MC", "Open", "Premain", "Main 1", "Main 2", "Close"];
 const MEDIA_ROLES = ["Photographer", "Social Media", "Videographer"];
-const ALL_SLOT_ROLES = [...ENTERTAINMENT_ROLES, ...MEDIA_ROLES];
+const STAFF_ROLES = ["Register", "Guestlist", "Freelist", "VIP/Cut-in", "Second Door", "Cloak", "Bottle Girl", "VIP Door"];
+const ALL_SLOT_ROLES = [...ENTERTAINMENT_ROLES, ...MEDIA_ROLES, ...STAFF_ROLES];
+// The Instagram promo card is a public lineup card, not an ops document --
+// deliberately excludes Staff (door/cloak/bottle service) even though Staff
+// is part of ALL_SLOT_ROLES for parsing/table-rendering purposes elsewhere.
+const PROMO_SLOT_ROLES = [...ENTERTAINMENT_ROLES, ...MEDIA_ROLES];
 
 function tabName(monthIdx, year) {
   return `${MONTH_ABBR[monthIdx].toUpperCase()} ${String(year).slice(-2)}`;
@@ -519,7 +529,7 @@ function buildStorySvg(ev, monthLabel) {
   lines.push(`<line x1="90" y1="${y}" x2="990" y2="${y}" stroke="#29293a" stroke-width="2"/>`);
   y += 56;
 
-  ev.slots.slice().sort((a, b) => ALL_SLOT_ROLES.indexOf(a.role) - ALL_SLOT_ROLES.indexOf(b.role)).forEach(slot => {
+  ev.slots.filter(s => PROMO_SLOT_ROLES.includes(s.role)).sort((a, b) => PROMO_SLOT_ROLES.indexOf(a.role) - PROMO_SLOT_ROLES.indexOf(b.role)).forEach(slot => {
     const name = slot.assigned || "Unassigned";
     const color = slot.assigned ? "#ffffff" : "#6a6a78";
     const style = slot.assigned ? "" : ' font-style="italic"';
@@ -817,6 +827,22 @@ function updateMySetsBar() {
   }
 }
 
+// Wraps one or more tables (some possibly null, when that role group has no
+// slots this night) under a single section heading -- returns null if every
+// table in the group is null, so an empty section never renders.
+function renderSectionGroup(heading, tables) {
+  const present = tables.filter(Boolean);
+  if (present.length === 0) return null;
+  const group = document.createElement("div");
+  group.className = "section-group";
+  const h3 = document.createElement("h3");
+  h3.className = "section-heading";
+  h3.textContent = heading;
+  group.appendChild(h3);
+  present.forEach(t => group.appendChild(t));
+  return group;
+}
+
 function render() {
   const listEl = document.getElementById("event-list");
   listEl.innerHTML = "";
@@ -835,9 +861,13 @@ function render() {
     card.appendChild(h2);
 
     const entTable = renderRoleTable(ev.slots, ENTERTAINMENT_ROLES, "Entertainment");
-    if (entTable) card.appendChild(entTable);
     const mediaTable = renderRoleTable(ev.slots, MEDIA_ROLES, "Media");
-    if (mediaTable) card.appendChild(mediaTable);
+    const entertainmentGroup = renderSectionGroup("Entertainment", [entTable, mediaTable]);
+    if (entertainmentGroup) card.appendChild(entertainmentGroup);
+
+    const staffTable = renderRoleTable(ev.slots, STAFF_ROLES, "Staff");
+    const staffGroup = renderSectionGroup("Staff", [staffTable]);
+    if (staffGroup) card.appendChild(staffGroup);
 
     listEl.appendChild(card);
   });
