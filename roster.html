@@ -592,8 +592,9 @@ function buildMonthStorySvg(events, monthLabel) {
     const rows = night.rows.length ? night.rows : [{ left: "", name: "Lineup TBA" }];
     rows.forEach(row => {
       const isTba = row.name === "Lineup TBA";
-      lines.push(`<text x="90" y="${y}" font-family="Segoe UI, sans-serif" font-size="${rowSize * 0.8}" fill="#8d8da0">${escapeXml(row.left)}</text>`);
-      lines.push(`<text x="990" y="${y}" text-anchor="end" font-family="Segoe UI, sans-serif" font-weight="700" font-size="${rowSize}" fill="${isTba ? "#6a6a78" : "#ffffff"}"${isTba ? ' font-style="italic"' : ""}>${escapeXml(row.name)}</text>`);
+      const leftSpan = row.left ? `<tspan fill="#8d8da0" font-size="${rowSize * 0.8}">${escapeXml(row.left)}</tspan><tspan fill="#4a4a55">  —  </tspan>` : "";
+      const nameSpan = `<tspan fill="${isTba ? "#6a6a78" : "#ffffff"}" font-weight="700"${isTba ? ' font-style="italic"' : ""}>${escapeXml(row.name)}</tspan>`;
+      lines.push(`<text x="90" y="${y}" font-family="Segoe UI, sans-serif" font-size="${rowSize}">${leftSpan}${nameSpan}</text>`);
       y += rowH;
     });
     y += rowH * 0.25;
