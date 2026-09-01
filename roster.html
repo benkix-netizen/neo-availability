@@ -562,6 +562,66 @@ function buildStorySvg(ev, monthLabel) {
   </svg>`;
 }
 
+// Whole-month promo card: every set for every Friday, same time+name rows
+// as the per-date cards -- condensed by scaling row height/fonts down as
+// the month gets busier so it still fits the 1080x1920 frame. Unassigned
+// slots are skipped here (public lineup card, not an ops document).
+function buildMonthStorySvg(events, monthLabel) {
+  const W = 1080, H = 1920;
+  const nights = events.map(ev => ({
+    dateLabel: formatDateDisplay(ev.date),
+    rows: ev.slots.filter(s => PROMO_SLOT_ROLES.includes(s.role) && s.assigned)
+      .sort((a, b) => PROMO_SLOT_ROLES.indexOf(a.role) - PROMO_SLOT_ROLES.indexOf(b.role))
+      .map(s => ({
+        left: `${s.role} · ${s.end ? `${formatShortTime(s.start)}–${formatShortTime(s.end)}` : formatShortTime(s.start)}`,
+        name: s.assigned
+      }))
+  }));
+
+  const top = 400, bottom = H - 140;
+  const totalRows = nights.reduce((sum, n) => sum + Math.max(n.rows.length, 1), 0);
+  const rowH = Math.max(30, Math.min(62, (bottom - top) / Math.max(totalRows + nights.length * 0.88, 1)));
+  const dateSize = Math.max(22, Math.min(44, rowH * 0.74));
+  const rowSize = Math.max(16, Math.min(32, rowH * 0.5));
+
+  const lines = [];
+  let y = top;
+  nights.forEach(night => {
+    lines.push(`<text x="90" y="${y}" font-family="Georgia, serif" font-weight="700" font-size="${dateSize}" fill="#c6ff3d">${escapeXml(night.dateLabel)}</text>`);
+    y += dateSize * 0.85;
+    const rows = night.rows.length ? night.rows : [{ left: "", name: "Lineup TBA" }];
+    rows.forEach(row => {
+      const isTba = row.name === "Lineup TBA";
+      lines.push(`<text x="90" y="${y}" font-family="Segoe UI, sans-serif" font-size="${rowSize * 0.8}" fill="#8d8da0">${escapeXml(row.left)}</text>`);
+      lines.push(`<text x="990" y="${y}" text-anchor="end" font-family="Segoe UI, sans-serif" font-weight="700" font-size="${rowSize}" fill="${isTba ? "#6a6a78" : "#ffffff"}"${isTba ? ' font-style="italic"' : ""}>${escapeXml(row.name)}</text>`);
+      y += rowH;
+    });
+    y += rowH * 0.25;
+  });
+
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="storyBgMonth" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#0d0710"/>
+        <stop offset="55%" stop-color="#1a0f2e"/>
+        <stop offset="100%" stop-color="#050506"/>
+      </linearGradient>
+    </defs>
+    <rect width="${W}" height="${H}" fill="url(#storyBgMonth)"/>
+    <g stroke="#c6ff3d" stroke-width="3" fill="none" opacity="0.85">
+      <path d="M 50 170 V 90 Q 50 60 80 60 H 160"/>
+      <path d="M 920 60 H 1000 Q 1030 60 1030 90 V 170"/>
+      <path d="M 1030 ${H - 170} V ${H - 90} Q 1030 ${H - 60} 1000 ${H - 60} H 920"/>
+      <path d="M 160 ${H - 60} H 80 Q 50 ${H - 60} 50 ${H - 90} V ${H - 170}"/>
+    </g>
+    <text x="540" y="180" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="30" letter-spacing="8" fill="#c6ff3d">NEO</text>
+    <text x="540" y="290" text-anchor="middle" font-family="Georgia, serif" font-weight="700" font-size="70" fill="#ffffff">${escapeXml(monthLabel)}</text>
+    <line x1="440" y1="330" x2="640" y2="330" stroke="#c6ff3d" stroke-width="2"/>
+    ${lines.join("\n    ")}
+    <text x="540" y="${H - 90}" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="24" fill="#8d8da0">Full roster: benkix-netizen.github.io/neo-availability/roster.html</text>
+  </svg>`;
+}
+
 function downloadStoryPng(svgString, filename) {
   const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(svgBlob);
@@ -586,6 +646,19 @@ function downloadStoryPng(svgString, filename) {
 function initPromoButtons(events, monthLabel) {
   const container = document.getElementById("promo-buttons");
   container.innerHTML = "";
+
+  if (events.length) {
+    const monthBtn = document.createElement("button");
+    monthBtn.type = "button";
+    monthBtn.className = "cal-btn small";
+    monthBtn.innerHTML = `Download <span class="promo-btn-dates">(whole month)</span>`;
+    monthBtn.onclick = () => {
+      const svg = buildMonthStorySvg(events, monthLabel);
+      downloadStoryPng(svg, `Neo-${slugify(monthLabel)}-whole-month.png`);
+    };
+    container.appendChild(monthBtn);
+  }
+
   events.forEach(ev => {
     const dateLabel = formatDateDisplay(ev.date);
     const btn = document.createElement("button");
