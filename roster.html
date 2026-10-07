@@ -437,7 +437,11 @@ function melbourneLocalToUtc(localDate) {
     localDate.getFullYear(), localDate.getMonth(), localDate.getDate(),
     localDate.getHours(), localDate.getMinutes(), 0
   ));
-  const offsetMin = tzOffsetMinutes(guessUtc, TZ);
+  // Two-pass: the first offset is sampled ~10-11h away from the real instant,
+  // which picks the wrong side of a DST change (e.g. Sat night before the
+  // first Sunday of October) -- re-sample at the corrected instant.
+  const firstPass = new Date(guessUtc.getTime() - tzOffsetMinutes(guessUtc, TZ) * 60000);
+  const offsetMin = tzOffsetMinutes(firstPass, TZ);
   return new Date(guessUtc.getTime() - offsetMin * 60000);
 }
 
